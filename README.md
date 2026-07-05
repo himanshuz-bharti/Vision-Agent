@@ -1,140 +1,182 @@
-# Local Desktop Agent MVP
+# Local Desktop Agent
 
-This is a first-pass local desktop-control agent:
+A human-in-the-loop desktop automation agent. You give it a task in plain English; it **plans** the task into ordered subgoals using an LLM, then **executes one subgoal at a time**, pausing for your approval before each.
 
-```text
-user task
--> screenshot
--> OCR + optional local VLM summary
--> local Qwen planner chooses one JSON action
--> safety gate approves or blocks
--> PyAutoGUI executes
--> verifier checks visible result
--> repeat up to 10 steps
-```
-
-The default mode is dry-run. It captures the screen, asks the local planner what it would do, logs the result, and stops without moving the mouse or typing.
-
-## What You Have
-
-From the checks I could run in this workspace:
+It reads the screen using **Windows UI Automation (UIA)** to build a list of interactive controls, overlays them as a "Set of Marks" (`*_marks.png`), and passes the marked screenshot to a vision model (VLM) for precise grounding. The planner and VLM can run via **Groq** (recommended), **Hugging Face Serverless**, or **Ollama** (local).
 
 ```text
-GPU: NVIDIA GeForce GTX 1650 Ti, 4096 MiB VRAM
-CPU threads visible to Python: 8
-Python: 3.13.12
-Ollama client: installed, but the Ollama server was not running
-Tesseract OCR: not installed or not on PATH
+task text
+  -> LLM plans ordered subgoals
+  -> for each subgoal:
+       ask you: [E]xecute / [S]kip / [Q]uit
+       loop:  screenshot -> UIA -> Set of Marks image -> VLM
+              -> planner picks ONE action
+              -> safety gate -> execute (PyAutoGUI) -> verify
+       until the subgoal is done, blocked, or the step budget is spent
+  -> summary
 ```
 
-That GPU is usable for small/quantized local models. For this project, lean on OCR and small VLMs first.
+## Install
 
-## Setup
+1. Clone the repository and navigate into it:
+   ```powershell
+   cd C:\Vision_Chatbot
+   ```
+2. Create and activate a Python virtual environment:
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   ```
+3. Install dependencies:
+   ```powershell
+   pip install -r requirements.txt
+   ```
 
-```powershell
-cd C:\Vision_Chatbot
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+> [!NOTE]
+> Main dependencies are `Pillow`, `PyAutoGUI`, `requests`, and `uiautomation` (Windows-only, used to retrieve interactive desktop controls). This agent must be run in an interactive Windows desktop session (not via SSH or background service).
 
-Start Ollama in another terminal:
+---
 
-```powershell
-ollama serve
-```
+## Config & Model Providers
 
-Pull the low-resource default models:
+The agent picks the first available provider in this order: **Groq** > **Hugging Face** > **Ollama** (local).
 
-```powershell
-ollama pull qwen2.5-coder:3b
-ollama pull moondream
-```
+### 1. Groq Cloud (Recommended)
 
-Optional OCR install on Windows:
+Groq offers the most generous free tier: **~30 requests/minute**, **~14,400 requests/day** — orders of magnitude more than Hugging Face's free tier.
 
-```powershell
-winget install --id UB-Mannheim.TesseractOCR
-```
+1. Create a free API key at [Groq Console](https://console.groq.com/keys).
+2. Add it to your `.env` file in the project root:
+   ```env
+   GROQ_API_KEY=gsk_your_groq_api_key_here
+   ```
+3. When `GROQ_API_KEY` is set, the agent automatically defaults to the following Groq models:
+   - **Planner:** `llama-3.3-70b-versatile`
+   - **VLM:** `llama-3.2-90b-vision-preview`
 
-Restart your terminal after installing Tesseract so it is on `PATH`.
+*Alternatively, provide your key at runtime: `--groq-key gsk_...`*
+
+### 2. Hugging Face Serverless Inference
+
+> [!WARNING]
+> The Hugging Face free tier has very aggressive rate limits (~100 requests/month per model). A single task can exhaust this quota. Consider using Groq instead.
+
+1. Create a free API token at [Hugging Face Tokens](https://huggingface.co/settings/tokens).
+2. Add it to your `.env` file:
+   ```env
+   HF_TOKEN=your_huggingface_token_here
+   ```
+3. When `HF_TOKEN` is set (and no `GROQ_API_KEY`), the agent defaults to:
+   - **Planner:** `Qwen/Qwen2.5-7B-Instruct`
+   - **VLM:** `Qwen/Qwen3-VL-30B-A3B-Instruct`
+
+*Alternatively, provide your token at runtime: `--hf-token hf_...`*
+
+### 3. Local Ollama
+
+If no cloud API key is detected, the agent falls back to Ollama.
+1. Download and start [Ollama](https://ollama.com).
+2. Start the Ollama server:
+   ```powershell
+   ollama serve
+   ```
+3. Pull the default planner and vision models:
+   ```powershell
+   ollama pull qwen2.5:7b       # planner (strong at structured JSON)
+   ollama pull qwen2.5vl:7b     # vision model (screen understanding + click grounding)
+   ```
+
+---
 
 ## Run
 
-Dry-run first:
+Run the agent from the project root (`C:\Vision_Chatbot`) with your virtual environment activated.
 
+### Quick Start (with Groq or HF key in `.env`)
+
+**See the plan only** (no screen control or VLM invocation):
 ```powershell
-python -m desktop_agent "Open Notepad and type hello from my local desktop agent"
+python -m desktop_agent --plan-only "Open Notepad and type hello"
 ```
 
-Actually execute low-risk actions:
-
+**Dry run** (plans and identifies target controls, without moving/clicking mouse/keyboard):
 ```powershell
-python -m desktop_agent --execute "Open Notepad and type hello from my local desktop agent"
+python -m desktop_agent "Open Notepad and type hello"
 ```
 
-Safer execution with manual approval before every action:
-
+**Execute for real** (asks you for confirmation before executing each subgoal):
 ```powershell
-python -m desktop_agent --execute --confirm-each-action "Open Notepad and type hello"
+python -m desktop_agent --execute "Open Notepad and type hello"
 ```
 
-Use a stronger planner if your machine can tolerate it:
-
+**Override default models**:
 ```powershell
-ollama pull qwen2.5-coder:7b
-python -m desktop_agent --planner-model qwen2.5-coder:7b --execute "Open Notepad and type hello"
+python -m desktop_agent --execute --planner-model "meta-llama/Llama-3.2-3B-Instruct" --vlm-model "llama-3.2-11b-vision-preview" "Open Notepad and type hello"
 ```
 
-Force VLM use:
+### Using Ollama (If no API keys are set)
 
 ```powershell
-python -m desktop_agent --use-vlm always --vlm-model moondream "Describe what app is open"
+python -m desktop_agent --plan-only "Open Notepad and type hello"
+python -m desktop_agent "Open Notepad and type hello"
+python -m desktop_agent --execute "Open Notepad and type hello"
 ```
 
-Each run writes screenshots and JSON logs under `runs\YYYYMMDD_HHMMSS\`.
+---
 
-## Local VLM Recommendations
-
-For your detected GTX 1650 Ti 4 GB VRAM:
-
-| Model | Command | Fit | Notes |
-| --- | --- | --- | --- |
-| Moondream 2 | `ollama pull moondream` | Best first choice | Small 1.8B-class vision model, light enough for low VRAM, good for basic screen descriptions. |
-| Gemma 3 4B | `ollama pull gemma3:4b` | Good next test | Multimodal and still relatively small, but may spill to CPU on 4 GB VRAM. |
-| MiniCPM-V 2.6 | `ollama pull minicpm-v` | Better quality, heavier | Strong OCR/vision reputation, but the Ollama model is about 5.5 GB, so expect slower CPU/RAM fallback on your GPU. |
-| Llama 3.2 Vision 11B | `ollama pull llama3.2-vision:11b` | Quality test only | About 7.8 GB in Ollama; likely too heavy for smooth use on 4 GB VRAM. |
-
-Practical recommendation: use `moondream` for the VLM and `qwen2.5-coder:3b` for planning first. Upgrade the planner to `qwen2.5-coder:7b` if latency is acceptable.
-
-## How To Check Your Machine Specs
-
-PowerShell:
-
-```powershell
-nvidia-smi
-[Environment]::ProcessorCount
-Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors
-Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory
-Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,DriverVersion
-```
-
-Windows UI:
+## Options
 
 ```text
-Ctrl + Shift + Esc -> Performance tab -> CPU, Memory, GPU
-Win + R -> dxdiag -> Display tab
+--plan-only                 produce and print the plan, then stop
+--execute                   actually move/click/type (default is dry-run)
+--hitl subgoal|action|off   confirm before each subgoal (default), each action, or nothing
+--max-steps-per-subgoal N   max actions per subgoal (default 6)
+--use-vlm auto|always|never use the vision model never, always, or auto (default always)
+--grounding uia             where click targets come from (default uia)
+--planner-model NAME        model name (default: llama-3.3-70b-versatile for Groq, Qwen/Qwen2.5-7B-Instruct for HF, qwen2.5:7b for Ollama)
+--vlm-model NAME            vision model (default: llama-3.2-90b-vision-preview for Groq, Qwen/Qwen3-VL-30B-A3B-Instruct for HF, qwen2.5vl:7b for Ollama)
+--ollama-host URL           Ollama server URL (default http://localhost:11434)
+--hf-token TOKEN            Hugging Face API token (overrides HF_TOKEN in .env)
+--groq-key KEY              Groq API key (overrides GROQ_API_KEY in .env)
+--verbose-logs              stream structured logs to console
 ```
 
-## Safety Limits
+---
 
-The MVP blocks or asks for user involvement around passwords, OTPs, banking, purchases, deletes, installs, security settings, unknown targets, low confidence, and destructive hotkeys. `--execute` is still real desktop control, so test in Notepad, Calculator, local files, and harmless webpages first.
+## How it works
 
-## Next Features
+- **Planning** (`planner.py`) — The LLM decomposes the task into 2–6 verifiable subgoals, each with a `done_when` condition. If parsing/generation fails, it falls back to a single-step plan.
+- **Perception** (`perception/`) — Captures a screenshot, walks the active window's Windows UI Automation (UIA) tree to collect interactive candidates (buttons, edits, menus, checkboxes), assigns integer marks starting from 1, draws numbered boundaries on the screenshot (`*_marks.png`), and (if enabled) runs the vision model (VLM) to describe the layout or ground instructions.
+- **Action planning** (`planner.py`) — The LLM selects the next action (e.g. `open_app`, `click`, `type`, `hotkey`, `scroll`, `wait`, `ask_user`, `finish`). For clicks/interaction, it specifies the target mark ID. The VLM acts as a grounding bridge to map natural-language target descriptions to UIA control coordinates.
+- **Safety** (`safety.py`) — Inspects proposed actions before execution, hard-blocking sensitive data entry (passwords, credentials, payment fields) and requiring approval for critical system events.
+- **Verification** (`verifier.py`) — Compares screenshots and control states before and after an action to check for progress.
 
-- Draw an overlay showing the next click before executing.
-- Add Playwright for browser tasks instead of using raw mouse clicks.
-- Add a local verifier model that compares before/after screenshots.
-- Add voice pause/resume with whisper.cpp and Silero VAD.
-- Add teach-by-demonstration to record a workflow and replay it.
-- Add app-specific adapters for VS Code, File Explorer, browser, and terminal.
+---
+
+## Project layout
+
+```text
+desktop_agent/
+  cli.py            argument parsing -> Config -> Agent
+  config.py         Config dataclass (environment variable loading + validation)
+  agent.py          execution orchestration and perceive/act/verify loops
+  planner.py        task planner (subgoal planning and next action planner)
+  actions.py        atomic actions wrapper using PyAutoGUI
+  safety.py         safety policy evaluation
+  verifier.py       post-action state transition verifier
+  models.py         clients for Ollama, Hugging Face, and Groq APIs
+  logging_utils.py  logging configuration and structured event tracer
+  perception/
+    screen.py       screenshot capture and sizing helper
+    uia.py          Windows UI Automation tree traversal
+    perceiver.py    perception controller, candidate builder, set-of-marks drawer
+    vlm.py          VLM query controller for grounding and layout summary
+tests/              unit tests (discoverable via: python -m unittest discover -s tests -v)
+```
+
+## Running Tests
+
+Run the unit tests to verify the agent's core functionalities:
+```powershell
+python -m unittest discover -s tests -v
+```

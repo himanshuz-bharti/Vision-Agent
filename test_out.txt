@@ -1,0 +1,135 @@
+﻿python : ..plan_error 
+{"error_type": 
+"ValueError", "error": 
+"model did not return 
+JSON: not json at all", 
+"model": "m", "task": 
+"Do the thing"}
+At line:1 char:1
++ python -m unittest 
+tests/test_core.py 2>&1 
+| Out-File -Encoding 
+utf8  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo       
+       : NotSpecified:   
+  (..plan_error {"..."   
+ Do the thing"}:Strin    
+g) [], RemoteExcepti    
+on
+    + FullyQualifiedErro 
+   rId : NativeCommandE  
+  rror
+ 
+plan_error
+Traceback (most recent 
+call last):
+  File "C:\Vision_Chatbot
+\desktop_agent\planner.py
+", line 300, in 
+parse_json_object
+    parsed = 
+json.loads(raw)
+  File 
+"C:\Users\Himanshu Bharti
+\miniconda3\Lib\json\__in
+it__.py", line 352, in 
+loads
+    return _default_decod
+er.decode(s)
+           ~~~~~~~~~~~~~~
+~~~~~~~~~^^^
+  File 
+"C:\Users\Himanshu Bharti
+\miniconda3\Lib\json\deco
+der.py", line 345, in 
+decode
+    obj, end = 
+self.raw_decode(s, 
+idx=_w(s, 0).end())
+               ~~~~~~~~~~
+~~~~~^^^^^^^^^^^^^^^^^^^^
+^^^
+  File 
+"C:\Users\Himanshu Bharti
+\miniconda3\Lib\json\deco
+der.py", line 363, in 
+raw_decode
+    raise JSONDecodeError
+("Expecting value", s, 
+err.value) from None
+json.decoder.JSONDecodeEr
+ror: Expecting value: 
+line 1 column 1 (char 0)
+
+During handling of the 
+above exception, another 
+exception occurred:
+
+Traceback (most recent 
+call last):
+  File "C:\Vision_Chatbot
+\desktop_agent\planner.py
+", line 70, in make_plan
+    plan = 
+_parse_plan(raw, task)
+  File "C:\Vision_Chatbot
+\desktop_agent\planner.py
+", line 371, in 
+_parse_plan
+    parsed = 
+parse_json_object(raw)
+  File "C:\Vision_Chatbot
+\desktop_agent\planner.py
+", line 304, in 
+parse_json_object
+    raise 
+ValueError(f"model did 
+not return JSON: 
+{raw[:500]}")
+ValueError: model did 
+not return JSON: not 
+json at all
+plan_fallback 
+{"message": "Planning 
+fell back to a 
+single-step plan 
+(model/parse failure)."}
+.......F
+=========================
+=========================
+====================
+FAIL: test_typed_text_bec
+omes_visible (tests.test_
+core.VerifierTests.test_t
+yped_text_becomes_visible
+)
+-------------------------
+-------------------------
+--------------------
+Traceback (most recent 
+call last):
+  File "C:\Vision_Chatbot
+\tests\test_core.py", 
+line 81, in test_typed_te
+xt_becomes_visible
+    self.assertEqual(resu
+lt["status"], "success")
+    ~~~~~~~~~~~~~~~~^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 
+'uncertain' != 'success'
+- uncertain
++ success
+
+
+-------------------------
+-------------------------
+--------------------
+Ran 10 tests in 0.012s
+
+FAILED (failures=1)
+Planning: decomposing task with m ...
+Planning fell back to a single-step plan (model/parse failure).
+Planning: decomposing task with m ...
