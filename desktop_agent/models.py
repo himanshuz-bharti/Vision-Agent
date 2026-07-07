@@ -110,7 +110,8 @@ class OllamaClient:
             timeout=timeout,
             temperature=temperature,
         )
-        image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        img_bytes = optimize_image_for_vlm(image_path)
+        image_b64 = base64.b64encode(img_bytes).decode("ascii")
         try:
             content = self.chat(
                 model,
@@ -174,8 +175,8 @@ class OpenAICompatibleClient:
     provider_name: str = "openai"
 
     # Retry settings for rate-limited (402/429) responses on free tiers.
-    MAX_RETRIES = 3
-    RETRY_BASE_DELAY = 10  # seconds; doubles each retry
+    MAX_RETRIES = 4
+    RETRY_BASE_DELAY = 30  # seconds; doubles each retry (30s → 60s → 120s → 240s)
 
     def __init__(self, token: str, base_url: str) -> None:
         self.token = token
@@ -185,10 +186,10 @@ class OpenAICompatibleClient:
         self,
         model: str,
         messages: list[dict[str, Any]],
-        *,
         temperature: float = 0.0,
         json_mode: bool = False,
         timeout: int = 180,
+        **kwargs: Any,
     ) -> str:
         headers = {"Authorization": f"Bearer {self.token}"}
         payload: dict[str, Any] = {
@@ -199,6 +200,7 @@ class OpenAICompatibleClient:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        payload.update(kwargs)
 
         started = time.perf_counter()
         log_event(
@@ -284,9 +286,11 @@ class OpenAICompatibleClient:
         *,
         temperature: float = 0.0,
         timeout: int = 240,
+        **kwargs: Any,
     ) -> str:
         started = time.perf_counter()
-        image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        img_bytes = optimize_image_for_vlm(image_path)
+        image_b64 = base64.b64encode(img_bytes).decode("ascii")
 
         messages = [
             {
@@ -306,7 +310,7 @@ class OpenAICompatibleClient:
             temperature=temperature,
         )
         try:
-            content = self.chat(model, messages, temperature=temperature, timeout=timeout)
+            content = self.chat(model, messages, temperature=temperature, timeout=timeout, **kwargs)
         except Exception as exc:
             log_exception(f"{self.provider_name}_chat_with_image_error", exc, model=model, image_path=image_path)
             raise
@@ -324,20 +328,39 @@ class OpenAICompatibleClient:
         return {"reachable": True, "models": [], "error": None}
 
 
-class HuggingFaceClient(OpenAICompatibleClient):
-    """Client for Hugging Face Serverless Inference API."""
 
-    provider_name = "hf"
+class NvidiaClient(OpenAICompatibleClient):
+    """Client for NVIDIA NIM Inference API (minimaxai/minimax-m3)."""
 
-    def __init__(self, token: str) -> None:
-        super().__init__(token, "https://router.huggingface.co/v1")
-
-
-class GroqClient(OpenAICompatibleClient):
-    """Client for Groq Cloud Inference API (free tier: ~30 req/min)."""
-
-    provider_name = "groq"
+    provider_name = "nvidia"
 
     def __init__(self, token: str) -> None:
-        super().__init__(token, "https://api.groq.com/openai/v1")
+        super().__init__(token, "https://integrate.api.nvidia.com/v1")
 
+
+def optimize_image_for_vlm(image_path: Path, max_width: int = 1024) -> bytes:
+    """Resize the image to a max width and convert to JPEG bytes to optimize VLM processing."""
+    from PIL import Image
+    import io
+    try:
+        with Image.open(image_path) as img:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            w, h = img.size
+            if w > max_width:
+                ratio = max_width / float(w)
+                new_size = (max_width, int(h * ratio))
+                try:
+                    resample = Image.Resampling.LANCZOS
+                except AttributeError:
+                    resample = Image.ANTIALIAS
+                img = img.resize(new_size, resample)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue()
+    except Exception as exc:
+        log_exception("optimize_image_error", exc)
+        try:
+            return image_path.read_bytes()
+        except Exception:
+            return b""

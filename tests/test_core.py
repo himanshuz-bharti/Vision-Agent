@@ -30,10 +30,10 @@ class MakePlanTests(unittest.TestCase):
         self.assertEqual(len(plan["subgoals"]), 2)
         self.assertEqual(plan["subgoals"][0]["goal"], "Open Notepad")
 
-    def test_falls_back_to_single_subgoal_on_garbage(self) -> None:
-        plan = make_plan(FakeClient("not json at all"), "m", "Do the thing")
-        self.assertEqual(len(plan["subgoals"]), 1)
-        self.assertIn("fallback", plan["notes"])
+    def test_make_plan_raises_value_error_on_garbage(self) -> None:
+        """If the model output is garbage, make_plan should raise an error to trigger cascade."""
+        with self.assertRaises(ValueError):
+            make_plan(FakeClient("not json at all"), "m", "Do the thing")
 
 
 class SubgoalDoneTests(unittest.TestCase):
